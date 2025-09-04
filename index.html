@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Adivinanza ➜ Enlace secreto</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', sans-serif; margin: 0; }
+    .wrap { min-height: 100dvh; display: grid; place-items: center; padding: 24px; background: radial-gradient(1200px 600px at 10% 10%, #e8f3ff22, transparent), radial-gradient(1200px 600px at 90% 90%, #ffe8f322, transparent); }
+    .card { width: min(720px, 92vw); background: rgba(255,255,255,0.75); backdrop-filter: blur(8px); border: 1px solid #0001; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,.08); padding: 28px; }
+    .title { font-size: clamp(22px, 2.6vw, 30px); margin: 0 0 8px; }
+    .muted { color: #555; margin: 0 0 18px; }
+    .q { font-size: clamp(18px, 2.2vw, 24px); font-weight: 700; letter-spacing: .3px; margin: 18px 0; }
+    .row { display: flex; gap: 12px; align-items: center; }
+    input[type="number"], input[type="text"] { flex: 1; padding: 12px 14px; font-size: 16px; border-radius: 12px; border: 1px solid #0002; outline: none; }
+    input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px #4f46e522; }
+    button { padding: 12px 16px; border: 0; background: #4f46e5; color: #fff; font-weight: 700; border-radius: 12px; cursor: pointer; }
+    button.secondary { background: #0f766e; }
+    .hint { font-size: 13px; color: #666; margin-top: 10px; }
+    .error { color: #b91c1c; font-weight: 600; }
+    .ok { color: #065f46; font-weight: 600; }
+    .footer { margin-top: 18px; font-size: 12px; color: #666; text-align: center; }
+    code { background: #0000000d; padding: 2px 6px; border-radius: 6px; }
+    .hidden { display: none !important; }
+    .tools { margin-top: 28px; font-size: 13px; color: #444; border-top: 1px dashed #aaa4; padding-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <main class="card" role="main">
+      <h1 class="title">🚪 Adivinanza para abrir el enlace</h1>
+      <p id="desc" class="muted">Resuelve una pregunta matemática para continuar al destino secreto.</p>
+
+      <div id="setup" class="hidden">
+        <p class="muted">Parece que falta el parámetro <code>q</code> en la URL.<br>Ejemplo: <code>?q=aHR0cHM6Ly93aWtpcGVkaWEub3JnL2VqZW1wbG8%3D</code></p>
+        <div class="row" style="margin-top:10px">
+          <input id="manualTarget" type="text" placeholder="Pega aquí un enlace (https://...)" />
+          <button id="setTargetBtn" class="secondary">Usar este enlace</button>
+        </div>
+        <p class="hint">El enlace se codificará en Base64 y se usará como <code>q</code>.</p>
+      </div>
+
+      <div id="quiz" class="hidden" aria-live="polite">
+        <div id="riddle" class="q">...</div>
+        <form id="form" class="row" autocomplete="off">
+          <input id="answer" type="number" inputmode="numeric" placeholder="Tu respuesta" required />
+          <button id="submit" type="submit">Responder</button>
+        </form>
+        <div id="msg" class="hint"></div>
+        <div class="footer" id="triesInfo"></div>
+      </div>
+
+      <div id="tools" class="tools hidden">
+        <h3 style="margin:0 0 6px;font-size:15px;">🔐 Crea tu propio enlace</h3>
+        <div class="row">
+          <input id="genInput" type="text" placeholder="https://ejemplo.com" />
+          <button id="genBtn">Generar</button>
+        </div>
+        <p id="genOutput" class="hint"></p>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    (function(){
+      const $ = sel => document.querySelector(sel);
+      const params = new URLSearchParams(location.search);
+
+      const base64UrlDecode = (input) => {
+        if (!input) return null;
+        try {
+          let str = input.replace(/-/g, '+').replace(/_/g, '/');
+          const pad = str.length % 4;
+          if (pad) str += '='.repeat(4 - pad);
+          const decoded = atob(str);
+          try { return decodeURIComponent(escape(decoded)); } catch { return decoded; }
+        } catch { return null; }
+      };
+
+      const base64UrlEncode = (input) => {
+        const raw = unescape(encodeURIComponent(input));
+        const b64 = btoa(raw);
+        return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/,'');
+      };
+
+      const normalizeUrl = (u) => {
+        if (!u) return null;
+        try {
+          if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+          const url = new URL(u);
+          return url.href;
+        } catch { return null; }
+      };
+
+      let target = null;
+      const q = params.get('q');
+      if (q) {
+        const decoded = base64UrlDecode(q);
+        const normalized = normalizeUrl(decoded);
+        if (normalized) target = normalized;
+      }
+
+      const $setup = $('#setup');
+      const $quiz  = $('#quiz');
+      const $riddle = $('#riddle');
+      const $answer = $('#answer');
+      const $form = $('#form');
+      const $msg = $('#msg');
+      const $triesInfo = $('#triesInfo');
+      const $tools = $('#tools');
+
+      if (!target) {
+        $setup.classList.remove('hidden');
+        $tools.classList.remove('hidden');
+        $('#setTargetBtn').addEventListener('click', () => {
+          const raw = $('#manualTarget').value.trim();
+          const normalized = normalizeUrl(raw);
+          if (!normalized) { alert('Enlace inválido.'); return; }
+          const encoded = base64UrlEncode(normalized);
+          const url = new URL(location.href);
+          url.searchParams.set('q', encoded);
+          location.replace(url.toString());
+        });
+        return;
+      }
+
+      // Generador manual de enlaces
+      $tools.classList.remove('hidden');
+      $('#genBtn').addEventListener('click', ()=>{
+        const raw = $('#genInput').value.trim();
+        const normalized = normalizeUrl(raw);
+        if (!normalized) { $('#genOutput').textContent = 'Enlace inválido'; return; }
+        const encoded = base64UrlEncode(normalized);
+        const base = location.origin + location.pathname;
+        $('#genOutput').textContent = base + '?q=' + encoded;
+      });
+
+      // Pregunta matemática
+      const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+      const ops = [
+        { s: '+', fn: (a,b)=>a+b, range:[10,99] },
+        { s: '-', fn: (a,b)=>a-b, range:[30,99] },
+        { s: '×', fn: (a,b)=>a*b, range:[3,12] },
+      ];
+      const op = ops[randInt(0, ops.length-1)];
+      let a, b, correct;
+      if (op.s === '×') { a = randInt(...op.range); b = randInt(...op.range); }
+      else if (op.s === '+') { a = randInt(...op.range); b = randInt(...op.range); }
+      else { a = randInt(...op.range); b = randInt(1, a); }
+      correct = op.fn(a,b);
+
+      $riddle.textContent = `¿Cuánto es ${a} ${op.s} ${b}?`;
+      $('#desc').innerHTML = `Hay un enlace secreto listo para abrirse si respondes bien 🤫`;
+      $quiz.classList.remove('hidden');
+
+      let tries = 0;
+      const updateTries = () => { $triesInfo.textContent = `Intentos: ${tries}`; };
+      updateTries();
+
+      $form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const val = Number($answer.value);
+        tries++;
+        updateTries();
+        if (Number.isFinite(val) && val === correct) {
+          $msg.textContent = '¡Correcto! Redirigiendo...';
+          $msg.className = 'hint ok';
+          setTimeout(() => {
+            if (/^https?:\/\//i.test(target)) {
+              window.location.href = target;
+            } else { alert('Enlace de destino inválido.'); }
+          }, 600);
+        } else {
+          $msg.textContent = 'Respuesta incorrecta. Intenta otra vez.';
+          $msg.className = 'hint error';
+          $answer.focus();
+          $answer.select();
+        }
+      });
+
+    })();
+  </script>
+</body>
+</html>
